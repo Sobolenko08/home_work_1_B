@@ -72,14 +72,14 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 </head>
 <body>
 
-<!-- Всплывающее окно первого входа -->
+<!-- Всплывающее окно входа -->
 <div id="login-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
   <div class="card p-6 max-w-sm w-full space-y-4 fade">
     <div class="text-center">
       <div class="font-bold text-xl flex items-center justify-center gap-2 mb-1">
         <span style="color:var(--ac)" id="modal-logo"></span>Smart School
       </div>
-      <p class="text-xs mut">Представьтесь для входа в классный дневник</p>
+      <p class="text-xs mut">Представьтесь для входа в дневник</p>
     </div>
     
     <form id="login-form" class="space-y-3">
@@ -91,9 +91,9 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
         </select>
       </div>
 
-      <div id="name-box">
-        <label class="text-xs mut block mb-1">Фамилия и Имя</label>
-        <input type="text" id="user-name" class="inp" placeholder="например: Соболенко Лика" required>
+      <div id="input-box">
+        <label class="text-xs mut block mb-1" id="input-label">Фамилия и Имя</label>
+        <input type="text" id="user-input" class="inp" placeholder="например: Соболенко Лика" required>
       </div>
 
       <button type="submit" class="btn w-full mt-2">Войти в дневник</button>
@@ -112,10 +112,9 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
         <button id="theme" class="chip !p-2" aria-label="Тема"></button>
       </div>
     </div>
-    <div class="card2 p-1 grid grid-cols-2 mt-3 gap-1" id="roles"></div>
   </header>
 
-  <main id="app" class="px-4 space-y-4"></main>
+  <main id="app" class="px-4 space-y-4 mt-4"></main>
 </div>
 
 <div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-6 px-4 py-3 rounded-2xl text-sm font-medium opacity-0 pointer-events-none transition z-50" style="background:var(--ac);color:var(--acf)"></div>
@@ -139,18 +138,18 @@ const P = {
 const ic = n => `<svg class="i" viewBox="0 0 24 24">${P[n]}</svg>`;
 
 const SUBJ = ['Математика', 'Русский язык', 'Литература', 'Окружающий мир', 'Английский язык', 'Информатика'];
-const KEY = 'smartschool_v2';
+const KEY = 'smartschool_v3';
+const TEACHER_CODE = '2026'; // Секретный код для входа учителя
 
 function demoData() {
   return {
-    user: null, // { name: 'Соболенко Лика', role: 'student' }
+    user: null, 
     theme: null,
     tab: 'hw',
     photoBase64: null,
     hw: [
       { id: 1, type: 'hw', subj: 'Математика', text: 'Стр. 42 №12, №14. Выполнить вычисления в тетради.', photo: null, completedBy: [] },
-      { id: 2, type: 'hw', subj: 'Русский язык', text: 'Упражнение 115. Подчеркнуть главные члены предложения.', photo: null, completedBy: [] },
-      { id: 3, type: 'news', subj: 'Объявление', text: 'Завтра 4-м уроком будет экскурсия в библиотеку. Не забудьте взять дневники!', photo: null, completedBy: [] }
+      { id: 2, type: 'news', subj: 'Объявление', text: 'Завтра 4-м уроком будет экскурсия в библиотеку. Не забудьте взять дневники!', photo: null, completedBy: [] }
     ]
   };
 }
@@ -181,31 +180,43 @@ $('#logo').innerHTML = ic('cap');
 $('#modal-logo').innerHTML = ic('cap');
 $('#switch-user').innerHTML = ic('user');
 
-// Обработка логина
-const loginModal = $('#login-modal');
+// Переключение полей в модалке входа
 const roleSelect = $('#role-select');
-const userNameInput = $('#user-name');
+const userInput = $('#user-input');
+const inputLabel = $('#input-label');
 
 roleSelect.onchange = (e) => {
   if (e.target.value === 'teacher') {
-    userNameInput.value = 'Анна Сергеевна (Учитель)';
-    userNameInput.disabled = true;
+    inputLabel.textContent = 'Секретный код учителя';
+    userInput.type = 'password';
+    userInput.value = '';
+    userInput.placeholder = 'Введите код доступа';
   } else {
-    userNameInput.value = '';
-    userNameInput.disabled = false;
-    userNameInput.placeholder = 'например: Соболенко Лика';
+    inputLabel.textContent = 'Фамилия и Имя';
+    userInput.type = 'text';
+    userInput.value = '';
+    userInput.placeholder = 'например: Соболенко Лика';
   }
 };
 
 $('#login-form').onsubmit = (e) => {
   e.preventDefault();
   const role = roleSelect.value;
-  const name = userNameInput.value.trim();
-  if (!name) return;
+  const val = userInput.value.trim();
 
-  S.user = { name, role };
+  if (role === 'teacher') {
+    if (val !== TEACHER_CODE) {
+      toast('Неверный код учителя!');
+      return;
+    }
+    S.user = { name: 'Учитель класса', role: 'teacher' };
+  } else {
+    if (!val) return;
+    S.user = { name: val, role: 'student' };
+  }
+
   save();
-  loginModal.classList.add('hidden');
+  $('#login-modal').classList.add('hidden');
   render();
 };
 
@@ -217,46 +228,29 @@ $('#switch-user').onclick = () => {
 
 function checkAuth() {
   if (!S.user) {
-    loginModal.classList.remove('hidden');
+    $('#login-modal').classList.remove('hidden');
   } else {
-    loginModal.classList.add('hidden');
+    $('#login-modal').classList.add('hidden');
   }
-}
-
-function roles() {
-  if (!S.user) return;
-  $('#roles').innerHTML = [
-    ['student', 'Ученик', 'user'],
-    ['teacher', 'Учитель', 'book']
-  ].map(([r, l, i]) => `
-    <button data-r="${r}" class="py-2 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition" style="${S.user.role === r ? 'background:var(--ac);color:var(--acf)' : 'color:var(--mut)'}">
-      ${ic(i)}${l}
-    </button>
-  `).join('');
-
-  document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
-    S.user.role = b.dataset.r;
-    save();
-    render();
-  });
 }
 
 function togHW(id) {
   const item = S.hw.find(x => x.id === id);
-  if (!item || !S.user) return;
+  if (!item || !S.user || S.user.role !== 'student') return;
 
   const idx = item.completedBy.indexOf(S.user.name);
   if (idx > -1) {
     item.completedBy.splice(idx, 1);
   } else {
     item.completedBy.push(S.user.name);
-    toast('Отлично! Задание отмечено как выполненное');
+    toast('Задание отмечено как выполненное');
   }
   save();
   render();
 }
 
 function delHW(id) {
+  if (S.user.role !== 'teacher') return;
   if (!confirm('Удалить эту запись?')) return;
   S.hw = S.hw.filter(x => x.id !== id);
   save();
@@ -265,7 +259,8 @@ function delHW(id) {
 }
 
 function hwCard(h) {
-  const isStudent = S.user.role === 'student';
+  const isStudent = S.user && S.user.role === 'student';
+  const isTeacher = S.user && S.user.role === 'teacher';
   const isDone = isStudent && h.completedBy.includes(S.user.name);
 
   return `
@@ -282,7 +277,7 @@ function hwCard(h) {
             <span class="chip !py-0.5 !px-2.5 !text-xs font-semibold ${h.type === 'news' ? 'on' : ''}">
               ${h.type === 'news' ? '📢 Объявление' : h.subj}
             </span>
-            ${S.user.role === 'teacher' ? `
+            ${isTeacher ? `
               <button class="mut hover:text-red-500" onclick="delHW(${h.id})">${ic('trash')}</button>
             ` : ''}
           </div>
@@ -291,14 +286,14 @@ function hwCard(h) {
 
           ${h.photo ? `
             <div class="mt-3 rounded-xl overflow-hidden border border-[var(--bd)] max-h-64 bg-black/5">
-              <img src="${h.photo}" alt="Прикрепленное фото" class="w-full h-full object-cover cursor-pointer" onclick="window.open('${h.photo}')">
+              <img src="${h.photo}" alt="Фото" class="w-full h-full object-cover cursor-pointer" onclick="window.open('${h.photo}')">
             </div>
           ` : ''}
 
           <div class="mt-3 pt-2.5 border-t border-[var(--bd)] flex items-center justify-between text-xs mut">
             <span>Выполнили: <b>${h.completedBy.length}</b> учеников</span>
-            ${S.user.role === 'teacher' && h.completedBy.length > 0 ? `
-              <span class="truncate max-w-[150px]" title="${h.completedBy.join(', ')}">${h.completedBy.join(', ')}</span>
+            ${isTeacher && h.completedBy.length > 0 ? `
+              <span class="truncate max-w-[180px]" title="${h.completedBy.join(', ')}">${h.completedBy.join(', ')}</span>
             ` : ''}
           </div>
         </div>
@@ -313,7 +308,7 @@ function studentView() {
   const totalHW = S.hw.filter(x => x.type === 'hw').length;
 
   return `
-    <div class="card p-4 fade">
+    <div class="card p-4 fade mb-4">
       <div class="flex items-center justify-between">
         <div>
           <div class="font-bold text-lg">${S.user.name}</div>
@@ -326,7 +321,7 @@ function studentView() {
       </div>
     </div>
 
-    <div class="flex gap-2">
+    <div class="flex gap-2 mb-4">
       <button class="chip flex-1 ${S.tab === 'hw' ? 'on' : ''}" onclick="S.tab='hw';save();render()">Домашнее задание</button>
       <button class="chip flex-1 ${S.tab === 'news' ? 'on' : ''}" onclick="S.tab='news';save();render()">Объявления</button>
     </div>
@@ -339,8 +334,15 @@ function studentView() {
 
 function teacherView() {
   return `
-    <form class="card p-4 space-y-3 fade" onsubmit="pubHW(event)">
-      <div class="font-bold text-base flex items-center gap-2">
+    <div class="card p-4 mb-4 fade">
+      <div class="font-bold text-base flex items-center gap-2 mb-1">
+        ${ic('user')} Панель Учителя
+      </div>
+      <p class="text-xs mut">Здесь вы можете публиковать задания и видеть, кто из 25 учеников их выполнил.</p>
+    </div>
+
+    <form class="card p-4 space-y-3 fade mb-4" onsubmit="pubHW(event)">
+      <div class="font-bold text-sm flex items-center gap-2">
         ${ic('plus')} Новая публикация
       </div>
 
@@ -377,8 +379,8 @@ function teacherView() {
       </button>
     </form>
 
-    <div class="font-bold pt-2 text-sm flex items-center justify-between">
-      <span>История публикаций</span>
+    <div class="font-bold pt-2 mb-2 text-sm flex items-center justify-between">
+      <span>История публикаций и отчеты</span>
       <span class="text-xs mut">${S.hw.length} записей</span>
     </div>
 
@@ -402,6 +404,8 @@ function handlePhoto(input) {
 
 function pubHW(e) {
   e.preventDefault();
+  if (!S.user || S.user.role !== 'teacher') return;
+
   const type = $('#p-type').value;
   const subj = $('#p-subj') ? $('#p-subj').value : 'Объявление';
   const text = $('#p-text').value.trim();
@@ -425,7 +429,6 @@ function pubHW(e) {
 
 function render() {
   checkAuth();
-  roles();
   if (!S.user) return;
   $('#app').innerHTML = S.user.role === 'student' ? studentView() : teacherView();
 }
