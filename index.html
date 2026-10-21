@@ -5,6 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart School — Электронный дневник класса</title>
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<!-- Подключаем Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+  // Конфигурация вашего проекта Firebase
+  const firebaseConfig = {
+    apiKey: "AIzaSyAp7TRF8uRTjBODKENjZJ_jh8AZXNzQP8I",
+    authDomain: "home-work-3ab5c.firebaseapp.com",
+    projectId: "home-work-3ab5c",
+    storageBucket: "home-work-3ab5c.firebasestorage.app",
+    messagingSenderId: "441733594051",
+    appId: "1:441733594051:web:a340f0569ed1719a4c5b76",
+    measurementId: "G-S1Z2Q43SLJ"
+  };
+
+  // Инициализация Firebase
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // Делаем функции доступными глобально в скрипте
+  window.db = db;
+  window.colRef = collection(db, "posts");
+  window.onSnapshot = onSnapshot;
+  window.addDoc = addDoc;
+  window.updateDoc = updateDoc;
+  window.deleteDoc = deleteDoc;
+  window.doc = doc;
+  window.getDocs = getDocs;
+
+  // Запуск приложения после инициализации базы
+  window.initAppCloud();
+</script>
+
 <style>
 :root {
   --bg: #DAF1DE;
@@ -138,26 +172,17 @@ const P = {
 const ic = n => `<svg class="i" viewBox="0 0 24 24">${P[n]}</svg>`;
 
 const SUBJ = ['Математика', 'Русский язык', 'Литература', 'Окружающий мир', 'Английский язык', 'Информатика'];
-const KEY = 'smartschool_v3';
-const TEACHER_CODE = '2026'; // Секретный код для входа учителя
+const TEACHER_CODE = '2026'; // Секретный код учителя
 
-function demoData() {
-  return {
-    user: null, 
-    theme: null,
-    tab: 'hw',
-    photoBase64: null,
-    hw: [
-      { id: 1, type: 'hw', subj: 'Математика', text: 'Стр. 42 №12, №14. Выполнить вычисления в тетради.', photo: null, completedBy: [] },
-      { id: 2, type: 'news', subj: 'Объявление', text: 'Завтра 4-м уроком будет экскурсия в библиотеку. Не забудьте взять дневники!', photo: null, completedBy: [] }
-    ]
-  };
-}
+let S = {
+  user: JSON.parse(localStorage.getItem('smartschool_user')) || null,
+  theme: null,
+  tab: 'hw',
+  photoBase64: null,
+  hw: []
+};
 
-let S;
-try { S = JSON.parse(localStorage.getItem(KEY)) || demoData(); } catch(e) { S = demoData(); }
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){} };
-
+const saveUser = () => { localStorage.setItem('smartschool_user', JSON.stringify(S.user)); };
 const $ = s => document.querySelector(s);
 
 function toast(m) {
@@ -174,13 +199,12 @@ function theme() {
   $('#theme').innerHTML = ic(t === 'dark' ? 'sun' : 'moon');
   return t;
 }
-$('#theme').onclick = () => { S.theme = theme() === 'dark' ? 'light' : 'dark'; save(); theme(); };
+$('#theme').onclick = () => { S.theme = theme() === 'dark' ? 'light' : 'dark'; theme(); };
 
 $('#logo').innerHTML = ic('cap');
 $('#modal-logo').innerHTML = ic('cap');
 $('#switch-user').innerHTML = ic('user');
 
-// Переключение полей в модалке входа
 const roleSelect = $('#role-select');
 const userInput = $('#user-input');
 const inputLabel = $('#input-label');
@@ -215,14 +239,14 @@ $('#login-form').onsubmit = (e) => {
     S.user = { name: val, role: 'student' };
   }
 
-  save();
+  saveUser();
   $('#login-modal').classList.add('hidden');
   render();
 };
 
 $('#switch-user').onclick = () => {
   S.user = null;
-  save();
+  saveUser();
   checkAuth();
 };
 
@@ -234,40 +258,64 @@ function checkAuth() {
   }
 }
 
-function togHW(id) {
-  const item = S.hw.find(x => x.id === id);
-  if (!item || !S.user || S.user.role !== 'student') return;
+// Функция инициализации связи с Firebase Firestore
+window.initAppCloud = function() {
+  theme();
+  checkAuth();
 
-  const idx = item.completedBy.indexOf(S.user.name);
+  // Слушаем изменения в базе данных в реальном времени
+  window.onSnapshot(window.colRef, (snapshot) => {
+    S.hw = [];
+    snapshot.forEach((docSnap) => {
+      S.hw.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    // Сортировка по времени (новые сверху)
+    S.hw.sort((a, b) => b.createdAt - a.createdAt);
+    render();
+  }, (error) => {
+    console.error("Ошибка загрузки из базы:", error);
+    toast("Ошибка подключения к базе данных");
+  });
+};
+
+async function togHW(id) {
+  if (!S.user || S.user.role !== 'student') return;
+  const item = S.hw.find(x => x.id === id);
+  if (!item) return;
+
+  let completedBy = item.completedBy || [];
+  const idx = completedBy.indexOf(S.user.name);
+  
   if (idx > -1) {
-    item.completedBy.splice(idx, 1);
+    completedBy.splice(idx, 1);
   } else {
-    item.completedBy.push(S.user.name);
+    completedBy.push(S.user.name);
     toast('Задание отмечено как выполненное');
   }
-  save();
-  render();
+
+  const docRef = window.doc(window.db, "posts", id);
+  await window.updateDoc(docRef, { completedBy });
 }
 
-function delHW(id) {
-  if (S.user.role !== 'teacher') return;
+async function delHW(id) {
+  if (!S.user || S.user.role !== 'teacher') return;
   if (!confirm('Удалить эту запись?')) return;
-  S.hw = S.hw.filter(x => x.id !== id);
-  save();
-  render();
+  
+  await window.deleteDoc(window.doc(window.db, "posts", id));
   toast('Запись удалена');
 }
 
 function hwCard(h) {
   const isStudent = S.user && S.user.role === 'student';
   const isTeacher = S.user && S.user.role === 'teacher';
-  const isDone = isStudent && h.completedBy.includes(S.user.name);
+  const completedBy = h.completedBy || [];
+  const isDone = isStudent && completedBy.includes(S.user.name);
 
   return `
     <div class="hw card p-4 fade ${isDone ? 'done' : ''}">
       <div class="flex items-start gap-3">
         ${isStudent && h.type === 'hw' ? `
-          <button class="ck mt-0.5" onclick="togHW(${h.id})" aria-label="Сделано">
+          <button class="ck mt-0.5" onclick="togHW('${h.id}')" aria-label="Сделано">
             ${isDone ? ic('check') : ''}
           </button>
         ` : ''}
@@ -278,7 +326,7 @@ function hwCard(h) {
               ${h.type === 'news' ? '📢 Объявление' : h.subj}
             </span>
             ${isTeacher ? `
-              <button class="mut hover:text-red-500" onclick="delHW(${h.id})">${ic('trash')}</button>
+              <button class="mut hover:text-red-500" onclick="delHW('${h.id}')">${ic('trash')}</button>
             ` : ''}
           </div>
 
@@ -291,9 +339,9 @@ function hwCard(h) {
           ` : ''}
 
           <div class="mt-3 pt-2.5 border-t border-[var(--bd)] flex items-center justify-between text-xs mut">
-            <span>Выполнили: <b>${h.completedBy.length}</b> учеников</span>
-            ${isTeacher && h.completedBy.length > 0 ? `
-              <span class="truncate max-w-[180px]" title="${h.completedBy.join(', ')}">${h.completedBy.join(', ')}</span>
+            <span>Выполнили: <b>${completedBy.length}</b> учеников</span>
+            ${isTeacher && completedBy.length > 0 ? `
+              <span class="truncate max-w-[180px]" title="${completedBy.join(', ')}">${completedBy.join(', ')}</span>
             ` : ''}
           </div>
         </div>
@@ -304,7 +352,7 @@ function hwCard(h) {
 
 function studentView() {
   const hwList = S.hw.filter(x => S.tab === 'hw' ? x.type === 'hw' : x.type === 'news');
-  const doneCount = S.hw.filter(x => x.type === 'hw' && x.completedBy.includes(S.user.name)).length;
+  const doneCount = S.hw.filter(x => x.type === 'hw' && (x.completedBy || []).includes(S.user.name)).length;
   const totalHW = S.hw.filter(x => x.type === 'hw').length;
 
   return `
@@ -322,8 +370,8 @@ function studentView() {
     </div>
 
     <div class="flex gap-2 mb-4">
-      <button class="chip flex-1 ${S.tab === 'hw' ? 'on' : ''}" onclick="S.tab='hw';save();render()">Домашнее задание</button>
-      <button class="chip flex-1 ${S.tab === 'news' ? 'on' : ''}" onclick="S.tab='news';save();render()">Объявления</button>
+      <button class="chip flex-1 ${S.tab === 'hw' ? 'on' : ''}" onclick="S.tab='hw';render()">Домашнее задание</button>
+      <button class="chip flex-1 ${S.tab === 'news' ? 'on' : ''}" onclick="S.tab='news';render()">Объявления</button>
     </div>
 
     <div class="space-y-3">
@@ -338,7 +386,7 @@ function teacherView() {
       <div class="font-bold text-base flex items-center gap-2 mb-1">
         ${ic('user')} Панель Учителя
       </div>
-      <p class="text-xs mut">Здесь вы можете публиковать задания и видеть, кто из 25 учеников их выполнил.</p>
+      <p class="text-xs mut">Публикуйте задания и следите за выполнением в реальном времени.</p>
     </div>
 
     <form class="card p-4 space-y-3 fade mb-4" onsubmit="pubHW(event)">
@@ -375,7 +423,7 @@ function teacherView() {
       </div>
 
       <button type="submit" class="btn w-full flex items-center justify-center gap-2">
-        ${ic('send')} Опубликовать для всего класса
+        ${ic('send')} Опубликовать в облако
       </button>
     </form>
 
@@ -385,7 +433,7 @@ function teacherView() {
     </div>
 
     <div class="space-y-3">
-      ${S.hw.slice().reverse().map(h => hwCard(h)).join('') || '<div class="mut text-center p-6 card">Нет публикаций</div>'}
+      ${S.hw.map(h => hwCard(h)).join('') || '<div class="mut text-center p-6 card">Нет публикаций</div>'}
     </div>
   `;
 }
@@ -402,7 +450,7 @@ function handlePhoto(input) {
   }
 }
 
-function pubHW(e) {
+async function pubHW(e) {
   e.preventDefault();
   if (!S.user || S.user.role !== 'teacher') return;
 
@@ -412,19 +460,25 @@ function pubHW(e) {
 
   if (!text) return;
 
-  S.hw.push({
-    id: Date.now(),
-    type,
-    subj,
-    text,
-    photo: S.photoBase64,
-    completedBy: []
-  });
+  try {
+    await window.addDoc(window.colRef, {
+      type,
+      subj,
+      text,
+      photo: S.photoBase64 || null,
+      completedBy: [],
+      createdAt: Date.now()
+    });
 
-  S.photoBase64 = null;
-  save();
-  render();
-  toast('Запись успешно опубликована!');
+    S.photoBase64 = null;
+    $('#p-text').value = '';
+    $('#photo-text').textContent = 'Прикрепить фото с доски/учебника';
+    $('#photo-label').classList.remove('on');
+    toast('Успешно опубликовано в облако!');
+  } catch (err) {
+    console.error("Ошибка отправки:", err);
+    toast("Ошибка публикации. Проверьте интернет.");
+  }
 }
 
 function render() {
@@ -432,10 +486,6 @@ function render() {
   if (!S.user) return;
   $('#app').innerHTML = S.user.role === 'student' ? studentView() : teacherView();
 }
-
-theme();
-checkAuth();
-render();
 </script>
 </body>
 </html>
