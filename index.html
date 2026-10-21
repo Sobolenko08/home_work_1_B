@@ -8,9 +8,11 @@
 <!-- Подключаем Firebase SDK -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import {
+    getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc,
+    onSnapshot, arrayUnion, arrayRemove, writeBatch
+  } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-  // Конфигурация вашего проекта Firebase
   const firebaseConfig = {
     apiKey: "AIzaSyAp7TRF8uRTjBODKENjZJ_jh8AZXNzQP8I",
     authDomain: "home-work-3ab5c.firebaseapp.com",
@@ -21,21 +23,17 @@
     measurementId: "G-S1Z2Q43SLJ"
   };
 
-  // Инициализация Firebase
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  // Делаем функции доступными глобально в скрипте
-  window.db = db;
-  window.colRef = collection(db, "posts");
-  window.onSnapshot = onSnapshot;
-  window.addDoc = addDoc;
-  window.updateDoc = updateDoc;
-  window.deleteDoc = deleteDoc;
-  window.doc = doc;
-  window.getDocs = getDocs;
+  // Один объект вместо десятка глобалов
+  window.fb = {
+    db,
+    colRef: collection(db, "posts"),
+    addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot,
+    arrayUnion, arrayRemove, writeBatch
+  };
 
-  // Запуск приложения после инициализации базы
   window.initAppCloud();
 </script>
 
@@ -90,6 +88,7 @@ html, body {
 .mut { color: var(--mut); }
 .btn { background: var(--ac); color: var(--acf); border-radius: 14px; font-weight: 600; padding: 12px 16px; transition: .15s; }
 .btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .6; pointer-events: none; }
 .chip { padding: 8px 12px; border-radius: 12px; background: var(--card); border: 1px solid var(--bd); white-space: nowrap; font-size: 13px; transition: .15s; cursor: pointer; }
 .chip.on { background: var(--ac); color: var(--acf); border-color: var(--ac); }
 .inp { width: 100%; background: var(--card2); border: 1px solid var(--bd); border-radius: 12px; padding: 10px 12px; color: var(--tx); outline: none; font-size: 15px; }
@@ -115,10 +114,10 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
       </div>
       <p class="text-xs mut">Представьтесь для входа в дневник</p>
     </div>
-    
+
     <form id="login-form" class="space-y-3">
       <div>
-        <label class="text-xs mut block mb-1">Кто вы?</label>
+        <label class="text-xs mut block mb-1" for="role-select">Кто вы?</label>
         <select id="role-select" class="inp">
           <option value="student">Ученик / Ученица</option>
           <option value="teacher">Учитель</option>
@@ -126,7 +125,7 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
       </div>
 
       <div id="input-box">
-        <label class="text-xs mut block mb-1" id="input-label">Фамилия и Имя</label>
+        <label class="text-xs mut block mb-1" id="input-label" for="user-input">Фамилия и Имя</label>
         <input type="text" id="user-input" class="inp" placeholder="например: Соболенко Анисия" required>
       </div>
 
@@ -142,7 +141,7 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
         <span style="color:var(--ac)" id="logo"></span>Домашнее задание
       </div>
       <div class="flex items-center gap-2">
-        <button id="switch-user" class="chip !p-2 text-xs flex items-center gap-1" title="Сменить профиль"></button>
+        <button id="switch-user" class="chip !p-2 text-xs flex items-center gap-1" title="Сменить профиль" aria-label="Сменить профиль"></button>
         <button id="theme" class="chip !p-2" aria-label="Тема"></button>
       </div>
     </div>
@@ -171,19 +170,39 @@ const P = {
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24">${P[n]}</svg>`;
 
-const SUBJ = ['Математика', 'Человек и мир', 'Обучение грамоте (Обучение чтению)', 'Беларуская мова',];
-const TEACHER_CODE = '2026'; // Секретный код учителя
+const SUBJ = ['Математика', 'Человек и мир', 'Обучение грамоте (Обучение чтению)', 'Беларуская мова'];
+const TEACHER_CODE = '2026';
+
+const $ = s => document.querySelector(s);
+
+/* ---------- ИСПРАВЛЕНИЕ #6: безопасное чтение localStorage ---------- */
+function loadUser() {
+  try {
+    const raw = localStorage.getItem('smartschool_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    console.warn('Повреждённые данные профиля, сбрасываю', e);
+    localStorage.removeItem('smartschool_user');
+    return null;
+  }
+}
+
+/* ---------- ИСПРАВЛЕНИЕ #4: экранирование ---------- */
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 
 let S = {
-  user: JSON.parse(localStorage.getItem('smartschool_user')) || null,
+  user: loadUser(),
   theme: null,
   tab: 'hw',
   photoBase64: null,
-  hw: []
+  hw: [],
+  draft: { type: 'hw', subj: SUBJ[0], text: '' },
+  mounted: null,
+  unsub: null
 };
 
 const saveUser = () => { localStorage.setItem('smartschool_user', JSON.stringify(S.user)); };
-const $ = s => document.querySelector(s);
 
 function toast(m) {
   const t = $('#toast');
@@ -229,10 +248,7 @@ $('#login-form').onsubmit = (e) => {
   const val = userInput.value.trim();
 
   if (role === 'teacher') {
-    if (val !== TEACHER_CODE) {
-      toast('Неверный код учителя!');
-      return;
-    }
+    if (val !== TEACHER_CODE) { toast('Неверный код учителя!'); return; }
     S.user = { name: 'Учитель класса', role: 'teacher' };
   } else {
     if (!val) return;
@@ -240,130 +256,171 @@ $('#login-form').onsubmit = (e) => {
   }
 
   saveUser();
-  $('#login-modal').classList.add('hidden');
+  userInput.value = '';
+  S.mounted = null;
   render();
 };
 
 $('#switch-user').onclick = () => {
   S.user = null;
   saveUser();
-  checkAuth();
+  S.mounted = null;
+  render();
 };
 
 function checkAuth() {
-  if (!S.user) {
-    $('#login-modal').classList.remove('hidden');
-  } else {
-    $('#login-modal').classList.add('hidden');
+  if (!S.user) $('#login-modal').classList.remove('hidden');
+  else $('#login-modal').classList.add('hidden');
+}
+
+/* ---------- ИСПРАВЛЕНИЕ #1: сжатие фото до лимита документа ---------- */
+const MAX_PHOTO_CHARS = 900 * 1024; // запас под лимит Firestore 1 МиБ
+
+async function compressImage(file, maxSide, quality) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bmp.width * scale));
+  c.height = Math.max(1, Math.round(bmp.height * scale));
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  if (bmp.close) bmp.close();
+  return await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/jpeg', quality));
+}
+
+const blobToDataURL = blob => new Promise((res, rej) => {
+  const fr = new FileReader();
+  fr.onload = () => res(fr.result);
+  fr.onerror = rej;
+  fr.readAsDataURL(blob);
+});
+
+async function preparePhoto(file) {
+  let side = 1200, q = 0.7;
+  for (let i = 0; i < 6; i++) {
+    const dataUrl = await blobToDataURL(await compressImage(file, side, q));
+    if (dataUrl.length <= MAX_PHOTO_CHARS) return dataUrl;
+    q = Math.max(0.35, q - 0.15);
+    side = Math.round(side * 0.8);
+  }
+  throw new Error('PHOTO_TOO_BIG');
+}
+
+/* ---------- ИСПРАВЛЕНИЕ #2: очистка вне onSnapshot, батчами, один раз ---------- */
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const CLEANUP_KEY = 'smartschool_cleanup_at';
+
+async function cleanupOldPhotos() {
+  const last = Number(localStorage.getItem(CLEANUP_KEY) || 0);
+  if (Date.now() - last < 12 * 60 * 60 * 1000) return; // не чаще 2 раз в сутки
+  try {
+    const snap = await window.fb.getDocs(window.fb.colRef);
+    const cutoff = Date.now() - THIRTY_DAYS_MS;
+    const refs = [];
+    snap.forEach(d => {
+      const data = d.data();
+      if (data.photo && data.createdAt && data.createdAt < cutoff) refs.push(d.ref);
+    });
+    for (let i = 0; i < refs.length; i += 400) {
+      const batch = window.fb.writeBatch(window.fb.db);
+      refs.slice(i, i + 400).forEach(r => batch.update(r, { photo: null }));
+      await batch.commit();
+    }
+    localStorage.setItem(CLEANUP_KEY, String(Date.now()));
+  } catch (e) {
+    console.error('Ошибка очистки старых фото:', e);
   }
 }
 
-
-// Константа 30 дней в миллисекундах
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-
-// Функция инициализации связи с Firebase Firestore с автоочисткой
-window.initAppCloud = function() {
+window.initAppCloud = function () {
   theme();
   checkAuth();
 
-  // Слушаем изменения в базе данных в реальном времени
-  window.onSnapshot(window.colRef, (snapshot) => {
+  if (S.unsub) S.unsub();
+
+  S.unsub = window.fb.onSnapshot(window.fb.colRef, (snapshot) => {
     S.hw = [];
-    const now = Date.now();
-
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      const docId = docSnap.id;
-      const createdAt = data.createdAt || 0;
-
-      // Проверка: прошло ли 30 дней с момента создания
-      if (createdAt > 0 && (now - createdAt > THIRTY_DAYS_MS)) {
-        
-        // --- ВАРИАНТ А: Удаляем только фото (оставляем текст) ---
-        if (data.photo) {
-          const docRef = window.doc(window.db, "posts", docId);
-          window.updateDoc(docRef, { photo: null }).catch(err => console.error("Ошибка очистки фото:", err));
-          data.photo = null; // очищаем локально для отображения
-        }
-      }
-
-      S.hw.push({ id: docId, ...data });
-    });
-
-    // Сортировка по времени (новые сверху)
-    S.hw.sort((a, b) => b.createdAt - a.createdAt);
+    snapshot.forEach(d => S.hw.push({ id: d.id, ...d.data() }));
+    S.hw.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     render();
   }, (error) => {
-    console.error("Ошибка загрузки из базы:", error);
-    toast("Ошибка подключения к базе данных");
+    console.error('Ошибка загрузки из базы:', error);
+    toast('Ошибка подключения к базе данных');
   });
+
+  cleanupOldPhotos();
 };
 
+/* ---------- ИСПРАВЛЕНИЕ #5: атомарные операции ---------- */
 async function togHW(id) {
   if (!S.user || S.user.role !== 'student') return;
   const item = S.hw.find(x => x.id === id);
   if (!item) return;
 
-  let completedBy = item.completedBy || [];
-  const idx = completedBy.indexOf(S.user.name);
-  
-  if (idx > -1) {
-    completedBy.splice(idx, 1);
-  } else {
-    completedBy.push(S.user.name);
-    toast('Задание отмечено как выполненное');
+  const done = (item.completedBy || []).includes(S.user.name);
+  try {
+    await window.fb.updateDoc(window.fb.doc(window.fb.db, 'posts', id), {
+      completedBy: done
+        ? window.fb.arrayRemove(S.user.name)
+        : window.fb.arrayUnion(S.user.name)
+    });
+    if (!done) toast('Задание отмечено как выполненное');
+  } catch (e) {
+    console.error('Ошибка отметки:', e);
+    toast('Не удалось сохранить. Проверьте интернет.');
   }
-
-  const docRef = window.doc(window.db, "posts", id);
-  await window.updateDoc(docRef, { completedBy });
 }
 
 async function delHW(id) {
   if (!S.user || S.user.role !== 'teacher') return;
   if (!confirm('Удалить эту запись?')) return;
-  
-  await window.deleteDoc(window.doc(window.db, "posts", id));
-  toast('Запись удалена');
+  try {
+    await window.fb.deleteDoc(window.fb.doc(window.fb.db, 'posts', id));
+    toast('Запись удалена');
+  } catch (e) {
+    console.error('Ошибка удаления:', e);
+    toast('Не удалось удалить запись.');
+  }
 }
 
+/* ---------- ИСПРАВЛЕНИЕ #4: карточка с экранированием и data-атрибутами ---------- */
 function hwCard(h) {
   const isStudent = S.user && S.user.role === 'student';
   const isTeacher = S.user && S.user.role === 'teacher';
   const completedBy = h.completedBy || [];
   const isDone = isStudent && completedBy.includes(S.user.name);
+  const names = completedBy.map(esc).join(', ');
 
   return `
     <div class="hw card p-4 fade ${isDone ? 'done' : ''}">
       <div class="flex items-start gap-3">
         ${isStudent && h.type === 'hw' ? `
-          <button class="ck mt-0.5" onclick="togHW('${h.id}')" aria-label="Сделано">
+          <button class="ck mt-0.5" data-act="tog" data-id="${esc(h.id)}" aria-label="Сделано" aria-pressed="${isDone}">
             ${isDone ? ic('check') : ''}
           </button>
         ` : ''}
-        
+
         <div class="flex-1 min-w-0">
           <div class="flex justify-between items-center gap-2">
             <span class="chip !py-0.5 !px-2.5 !text-xs font-semibold ${h.type === 'news' ? 'on' : ''}">
-              ${h.type === 'news' ? '📢 Объявление' : h.subj}
+              ${h.type === 'news' ? '📢 Объявление' : esc(h.subj || '')}
             </span>
             ${isTeacher ? `
-              <button class="mut hover:text-red-500" onclick="delHW('${h.id}')">${ic('trash')}</button>
+              <button class="mut" data-act="del" data-id="${esc(h.id)}" aria-label="Удалить">${ic('trash')}</button>
             ` : ''}
           </div>
 
-          <p class="txt text-sm mt-2.5 font-medium leading-relaxed">${h.text}</p>
+          <p class="txt text-sm mt-2.5 font-medium leading-relaxed">${esc(h.text)}</p>
 
           ${h.photo ? `
             <div class="mt-3 rounded-xl overflow-hidden border border-[var(--bd)] max-h-64 bg-black/5">
-              <img src="${h.photo}" alt="Фото" class="w-full h-full object-cover cursor-pointer" onclick="window.open('${h.photo}')">
+              <img src="${h.photo}" alt="Фото задания" class="w-full h-full object-cover cursor-pointer" data-act="zoom" data-id="${esc(h.id)}">
             </div>
           ` : ''}
 
           <div class="mt-3 pt-2.5 border-t border-[var(--bd)] flex items-center justify-between text-xs mut">
             <span>Выполнили: <b>${completedBy.length}</b> учеников</span>
             ${isTeacher && completedBy.length > 0 ? `
-              <span class="truncate max-w-[180px]" title="${completedBy.join(', ')}">${completedBy.join(', ')}</span>
+              <span class="truncate max-w-[180px]" title="${names}">${names}</span>
             ` : ''}
           </div>
         </div>
@@ -372,37 +429,41 @@ function hwCard(h) {
   `;
 }
 
-function studentView() {
-  const hwList = S.hw.filter(x => S.tab === 'hw' ? x.type === 'hw' : x.type === 'news');
-  const doneCount = S.hw.filter(x => x.type === 'hw' && (x.completedBy || []).includes(S.user.name)).length;
-  const totalHW = S.hw.filter(x => x.type === 'hw').length;
-
+/* ---------- ИСПРАВЛЕНИЕ #3: оболочка монтируется один раз ---------- */
+function studentShell() {
   return `
-    <div class="card p-4 fade mb-4">
-      <div class="flex items-center justify-between">
-        <div>
-          <div class="font-bold text-lg">${S.user.name}</div>
-          <div class="text-xs mut">Ученик класса</div>
-        </div>
-        <div class="text-right">
-          <div class="text-xs mut">Выполнено</div>
-          <div class="font-bold text-sm" style="color:var(--ac)">${doneCount} из ${totalHW}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="flex gap-2 mb-4">
-      <button class="chip flex-1 ${S.tab === 'hw' ? 'on' : ''}" onclick="S.tab='hw';render()">Домашнее задание</button>
-      <button class="chip flex-1 ${S.tab === 'news' ? 'on' : ''}" onclick="S.tab='news';render()">Объявления</button>
-    </div>
-
-    <div class="space-y-3">
-      ${hwList.map(h => hwCard(h)).join('') || `<div class="card p-8 text-center mut">${ic('check')}<div class="mt-2">Записей нет</div></div>`}
-    </div>
+    <div class="card p-4 fade mb-4" id="profile-card"></div>
+    <div class="flex gap-2 mb-4" id="tabs"></div>
+    <div class="space-y-3" id="list"></div>
   `;
 }
 
-function teacherView() {
+function renderStudentDynamic() {
+  const doneCount = S.hw.filter(x => x.type === 'hw' && (x.completedBy || []).includes(S.user.name)).length;
+  const totalHW = S.hw.filter(x => x.type === 'hw').length;
+
+  $('#profile-card').innerHTML = `
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="font-bold text-lg">${esc(S.user.name)}</div>
+        <div class="text-xs mut">Ученик класса</div>
+      </div>
+      <div class="text-right">
+        <div class="text-xs mut">Выполнено</div>
+        <div class="font-bold text-sm" style="color:var(--ac)">${doneCount} из ${totalHW}</div>
+      </div>
+    </div>`;
+
+  $('#tabs').innerHTML = `
+    <button class="chip flex-1 ${S.tab === 'hw' ? 'on' : ''}" data-act="tab" data-tab="hw">Домашнее задание</button>
+    <button class="chip flex-1 ${S.tab === 'news' ? 'on' : ''}" data-act="tab" data-tab="news">Объявления</button>`;
+
+  const list = S.hw.filter(x => S.tab === 'hw' ? x.type === 'hw' : x.type === 'news');
+  $('#list').innerHTML = list.map(hwCard).join('') ||
+    `<div class="card p-8 text-center mut">${ic('check')}<div class="mt-2">Записей нет</div></div>`;
+}
+
+function teacherShell() {
   return `
     <div class="card p-4 mb-4 fade">
       <div class="font-bold text-base flex items-center gap-2 mb-1">
@@ -411,108 +472,184 @@ function teacherView() {
       <p class="text-xs mut">Публикуйте задания и следите за выполнением в реальном времени.</p>
     </div>
 
-    <form class="card p-4 space-y-3 fade mb-4" onsubmit="pubHW(event)">
+    <form id="pub-form" class="card p-4 space-y-3 fade mb-4">
       <div class="font-bold text-sm flex items-center gap-2">
         ${ic('plus')} Новая публикация
       </div>
 
       <div class="grid grid-cols-2 gap-2">
         <div>
-          <label class="text-xs mut block mb-1">Тип</label>
-          <select id="p-type" class="inp" onchange="$('#subj-box').style.display = this.value === 'news' ? 'none' : 'block'">
+          <label class="text-xs mut block mb-1" for="p-type">Тип</label>
+          <select id="p-type" class="inp">
             <option value="hw">📚 Домашнее задание</option>
             <option value="news">📢 Объявление</option>
           </select>
         </div>
         <div id="subj-box">
-          <label class="text-xs mut block mb-1">Предмет</label>
+          <label class="text-xs mut block mb-1" for="p-subj">Предмет</label>
           <select id="p-subj" class="inp">
-            ${SUBJ.map(s => `<option value="${s}">${s}</option>`).join('')}
+            ${SUBJ.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
           </select>
         </div>
       </div>
 
       <div>
-        <label class="text-xs mut block mb-1">Текст задания / сообщения</label>
+        <label class="text-xs mut block mb-1" for="p-text">Текст задания / сообщения</label>
         <textarea id="p-text" rows="3" required class="inp" placeholder="Введите подробности задания..."></textarea>
       </div>
 
       <div>
         <label class="chip flex items-center justify-center gap-2 w-full text-center cursor-pointer" id="photo-label">
           ${ic('image')} <span id="photo-text">Прикрепить фото с доски/учебника</span>
-          <input type="file" accept="image/*" class="hidden" onchange="handlePhoto(this)">
+          <input type="file" id="p-file" accept="image/*" class="hidden">
         </label>
       </div>
 
-      <button type="submit" class="btn w-full flex items-center justify-center gap-2">
+      <button type="submit" id="pub-btn" class="btn w-full flex items-center justify-center gap-2">
         ${ic('send')} Опубликовать в облако
       </button>
     </form>
 
     <div class="font-bold pt-2 mb-2 text-sm flex items-center justify-between">
       <span>История публикаций и отчеты</span>
-      <span class="text-xs mut">${S.hw.length} записей</span>
+      <span class="text-xs mut" id="count"></span>
     </div>
 
-    <div class="space-y-3">
-      ${S.hw.map(h => hwCard(h)).join('') || '<div class="mut text-center p-6 card">Нет публикаций</div>'}
-    </div>
+    <div class="space-y-3" id="list"></div>
   `;
 }
 
-function handlePhoto(input) {
-  if (input.files && input.files[0]) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      S.photoBase64 = e.target.result;
-      $('#photo-text').textContent = 'Фото прикреплено!';
-      $('#photo-label').classList.add('on');
-    };
-    reader.readAsDataURL(input.files[0]);
+function renderTeacherDynamic() {
+  const count = $('#count');
+  if (count) count.textContent = `${S.hw.length} записей`;
+  const list = $('#list');
+  if (list) list.innerHTML = S.hw.map(hwCard).join('') ||
+    '<div class="mut text-center p-6 card">Нет публикаций</div>';
+}
+
+function bindTeacherShell() {
+  const type = $('#p-type');
+  const subj = $('#p-subj');
+  const text = $('#p-text');
+  const file = $('#p-file');
+
+  // Восстанавливаем черновик (важно при повторном монтировании)
+  type.value = S.draft.type;
+  subj.value = S.draft.subj;
+  text.value = S.draft.text;
+
+  const syncSubj = () => {
+    $('#subj-box').style.display = type.value === 'news' ? 'none' : 'block';
+  };
+  syncSubj();
+
+  type.onchange = () => { S.draft.type = type.value; syncSubj(); };
+  subj.onchange = () => { S.draft.subj = subj.value; };
+  text.oninput = () => { S.draft.text = text.value; };
+
+  const photoText = $('#photo-text');
+  const photoLabel = $('#photo-label');
+  if (S.photoBase64) {
+    photoText.textContent = 'Фото прикреплено!';
+    photoLabel.classList.add('on');
   }
+
+  file.onchange = async () => {
+    const f = file.files && file.files[0];
+    file.value = ''; // чтобы можно было выбрать тот же файл повторно
+    if (!f) return;
+    photoText.textContent = 'Обрабатываю фото...';
+    try {
+      S.photoBase64 = await preparePhoto(f);
+      photoText.textContent = 'Фото прикреплено!';
+      photoLabel.classList.add('on');
+    } catch (e) {
+      console.error(e);
+      S.photoBase64 = null;
+      photoText.textContent = 'Прикрепить фото с доски/учебника';
+      photoLabel.classList.remove('on');
+      toast(e.message === 'PHOTO_TOO_BIG'
+        ? 'Фото слишком большое даже после сжатия'
+        : 'Не удалось обработать фото. Используйте JPG или PNG.');
+    }
+  };
+
+  $('#pub-form').onsubmit = pubHW;
 }
 
 async function pubHW(e) {
   e.preventDefault();
   if (!S.user || S.user.role !== 'teacher') return;
 
-  const type = $('#p-type').value;
-  const subj = $('#p-subj') ? $('#p-subj').value : 'Объявление';
-  const text = $('#p-text').value.trim();
+  const btn = $('#pub-btn');
+  if (btn.disabled) return;
 
+  const text = S.draft.text.trim();
   if (!text) return;
 
+  btn.disabled = true;
   try {
-    await window.addDoc(window.colRef, {
-      type,
-      subj,
+    await window.fb.addDoc(window.fb.colRef, {
+      type: S.draft.type,
+      subj: S.draft.type === 'news' ? 'Объявление' : S.draft.subj,
       text,
-      photo: S.photoBase64 || null, // Отправляем фото, если оно было выбрано
+      photo: S.photoBase64 || null,
       completedBy: [],
       createdAt: Date.now()
     });
 
-    //ЗДЕСЬ ОЧИЩАЕМ ПАМЯТЬ ПОСЛЕ ОТПРАВКИ:
-    S.photoBase64 = null; 
-    $('#p-text').value = '';
-    const photoTextEl = $('#photo-text');
-    const photoLabelEl = $('#photo-label');
-    if (photoTextEl) photoTextEl.textContent = 'Прикрепить фото с доски/учебника';
-    if (photoLabelEl) photoLabelEl.classList.remove('on');
+    S.photoBase64 = null;
+    S.draft.text = '';
+
+    const t = $('#p-text'); if (t) t.value = '';
+    const pt = $('#photo-text'); if (pt) pt.textContent = 'Прикрепить фото с доски/учебника';
+    const pl = $('#photo-label'); if (pl) pl.classList.remove('on');
 
     toast('Успешно опубликовано в облако!');
   } catch (err) {
-    console.error("Ошибка отправки:", err);
-    toast("Ошибка публикации. Проверьте интернет.");
+    console.error('Ошибка отправки:', err);
+    toast('Ошибка публикации. Проверьте интернет.');
+  } finally {
+    btn.disabled = false;
   }
 }
+
 function render() {
   checkAuth();
-  if (!S.user) return;
-  $('#app').innerHTML = S.user.role === 'student' ? studentView() : teacherView();
+
+  if (!S.user) {
+    $('#app').innerHTML = '';
+    S.mounted = null;
+    return;
+  }
+
+  const role = S.user.role;
+
+  if (S.mounted !== role) {
+    S.mounted = role;
+    $('#app').innerHTML = role === 'student' ? studentShell() : teacherShell();
+    if (role === 'teacher') bindTeacherShell();
+  }
+
+  if (role === 'student') renderStudentDynamic();
+  else renderTeacherDynamic();
 }
+
+/* Делегирование событий — один раз на весь контейнер */
+$('#app').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const { act, id } = el.dataset;
+
+  if (act === 'tab') { S.tab = el.dataset.tab; render(); }
+  else if (act === 'tog') togHW(id);
+  else if (act === 'del') delHW(id);
+  else if (act === 'zoom') {
+    const item = S.hw.find(x => x.id === id);
+    if (item && item.photo) window.open(item.photo, '_blank');
+  }
+});
 </script>
 </body>
 </html>
-
 
