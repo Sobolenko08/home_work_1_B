@@ -487,22 +487,25 @@ async function pubHW(e) {
       type,
       subj,
       text,
-      photo: S.photoBase64 || null,
+      photo: S.photoBase64 || null, // Отправляем фото, если оно было выбрано
       completedBy: [],
       createdAt: Date.now()
     });
 
-    S.photoBase64 = null;
+    //ЗДЕСЬ ОЧИЩАЕМ ПАМЯТЬ ПОСЛЕ ОТПРАВКИ:
+    S.photoBase64 = null; 
     $('#p-text').value = '';
-    $('#photo-text').textContent = 'Прикрепить фото с доски/учебника';
-    $('#photo-label').classList.remove('on');
+    const photoTextEl = $('#photo-text');
+    const photoLabelEl = $('#photo-label');
+    if (photoTextEl) photoTextEl.textContent = 'Прикрепить фото с доски/учебника';
+    if (photoLabelEl) photoLabelEl.classList.remove('on');
+
     toast('Успешно опубликовано в облако!');
   } catch (err) {
     console.error("Ошибка отправки:", err);
     toast("Ошибка публикации. Проверьте интернет.");
   }
 }
-
 function render() {
   checkAuth();
   if (!S.user) return;
@@ -511,4 +514,5 @@ function render() {
 </script>
 </body>
 </html>
+
 
