@@ -127,7 +127,7 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 
       <div id="input-box">
         <label class="text-xs mut block mb-1" id="input-label">Фамилия и Имя</label>
-        <input type="text" id="user-input" class="inp" placeholder="например: Соболенко Лика" required>
+        <input type="text" id="user-input" class="inp" placeholder="например: Соболенко Анисия" required>
       </div>
 
       <button type="submit" class="btn w-full mt-2">Войти в дневник</button>
@@ -171,7 +171,7 @@ const P = {
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24">${P[n]}</svg>`;
 
-const SUBJ = ['Математика', 'Русский язык', 'Литература', 'Окружающий мир', 'Английский язык', 'Информатика'];
+const SUBJ = ['Математика', 'Человек и мир', 'Обучение грамоте (Обучение чтению)', 'Беларуская мова',];
 const TEACHER_CODE = '2026'; // Секретный код учителя
 
 let S = {
@@ -258,7 +258,11 @@ function checkAuth() {
   }
 }
 
-// Функция инициализации связи с Firebase Firestore
+
+// Константа 30 дней в миллисекундах
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Функция инициализации связи с Firebase Firestore с автоочисткой
 window.initAppCloud = function() {
   theme();
   checkAuth();
@@ -266,9 +270,27 @@ window.initAppCloud = function() {
   // Слушаем изменения в базе данных в реальном времени
   window.onSnapshot(window.colRef, (snapshot) => {
     S.hw = [];
+    const now = Date.now();
+
     snapshot.forEach((docSnap) => {
-      S.hw.push({ id: docSnap.id, ...docSnap.data() });
+      const data = docSnap.data();
+      const docId = docSnap.id;
+      const createdAt = data.createdAt || 0;
+
+      // Проверка: прошло ли 30 дней с момента создания
+      if (createdAt > 0 && (now - createdAt > THIRTY_DAYS_MS)) {
+        
+        // --- ВАРИАНТ А: Удаляем только фото (оставляем текст) ---
+        if (data.photo) {
+          const docRef = window.doc(window.db, "posts", docId);
+          window.updateDoc(docRef, { photo: null }).catch(err => console.error("Ошибка очистки фото:", err));
+          data.photo = null; // очищаем локально для отображения
+        }
+      }
+
+      S.hw.push({ id: docId, ...data });
     });
+
     // Сортировка по времени (новые сверху)
     S.hw.sort((a, b) => b.createdAt - a.createdAt);
     render();
